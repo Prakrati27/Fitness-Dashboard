@@ -529,7 +529,28 @@ document.getElementById("resetBtn").onclick=()=>{
 };
 document.getElementById("dlgCancel").onclick=()=>dlg.close();
 
+/* ---------- Apple Shortcut bridge: log via URL params ---------- */
+function num(v){if(v==null)return undefined;v=parseFloat(v);return isNaN(v)?undefined:v;}
+function ingestURL(){
+  const q=new URLSearchParams(location.search);
+  if(![...q.keys()].length)return false;
+  const date=q.get("date")||new Date().toISOString().slice(0,10);
+  const map={weight:num(q.get("weight")),kcalIn:num(q.get("kcal")),kcalBurned:num(q.get("burn")),protein:num(q.get("protein"))};
+  if(!Object.values(map).some(v=>v!==undefined))return false;
+  let e=state.entries.find(x=>x.date===date);
+  if(!e){e={date:date,weight:null,kcalIn:null,kcalBurned:null,protein:null};state.entries.push(e);}
+  ["weight","kcalIn","kcalBurned","protein"].forEach(k=>{if(map[k]!==undefined)e[k]=map[k];});
+  save();
+  try{history.replaceState(null,"",location.pathname);}catch(_){}
+  return true;
+}
+function toast(msg){const t=document.createElement("div");t.textContent=msg;
+  t.style.cssText="position:fixed;top:14px;left:50%;transform:translateX(-50%);background:var(--accent);color:#fff;padding:10px 16px;border-radius:12px;font:600 14px Inter,sans-serif;box-shadow:var(--shadow);z-index:99";
+  document.body.appendChild(t);setTimeout(()=>{t.style.transition="opacity .5s";t.style.opacity="0";setTimeout(()=>t.remove(),500);},2800);}
+
 /* ---------- init ---------- */
+const _logged=ingestURL();
 document.getElementById("e_date").value=new Date().toISOString().slice(0,10);
 render();
+if(_logged)toast("Logged from Apple Watch ✓");
 </script>
