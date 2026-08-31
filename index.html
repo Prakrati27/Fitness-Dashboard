@@ -192,7 +192,7 @@ dialog::backdrop{background:rgba(10,20,18,.5)}
     </div>
     <div class="card">
       <h2><span class="dot"></span>Calories vs maintenance</h2>
-      <p class="hint">Bars = what you ate. Line = your maintenance (TDEE). Green bars = deficit day.</p>
+      <p class="hint">Bars = what you ate. Line = your maintenance (BMR + that day's burn). Green bars = deficit day.</p>
       <div class="chart-box"><canvas id="cChart"></canvas></div>
     </div>
   </div>
@@ -224,7 +224,7 @@ dialog::backdrop{background:rgba(10,20,18,.5)}
       </div>
       <div class="tdee-out">
         <div class="t"><div class="lbl">BMR</div><div class="v tnum"><span id="o_bmr">—</span><small> kcal</small></div></div>
-        <div class="t"><div class="lbl">Maintenance (TDEE)</div><div class="v tnum"><span id="o_tdee">—</span><small> kcal</small></div></div>
+        <div class="t"><div class="lbl">Maintenance (BMR + burn)</div><div class="v tnum"><span id="o_tdee">—</span><small> kcal</small></div></div>
         <div class="t"><div class="lbl">Target deficit</div><div class="v tnum"><span id="o_def">—</span><small> kcal/day</small></div></div>
       </div>
     </div>
@@ -238,7 +238,7 @@ dialog::backdrop{background:rgba(10,20,18,.5)}
         <div class="field"><label>Calories eaten</label><input id="e_kin" type="number" inputmode="numeric" placeholder="e.g. 1500"></div>
       </div>
       <div class="frow">
-        <div class="field"><label>Calories burned (watch)</label><input id="e_kb" type="number" inputmode="numeric" placeholder="e.g. 600"></div>
+        <div class="field"><label>Calories burned (red ring)</label><input id="e_kb" type="number" inputmode="numeric" placeholder="e.g. 600"></div>
         <div class="field"><label>Protein (g)</label><input id="e_p" type="number" inputmode="numeric" placeholder="e.g. 130"></div>
       </div>
       <button class="btn" id="addBtn">Save this day</button>
@@ -262,7 +262,7 @@ dialog::backdrop{background:rgba(10,20,18,.5)}
       <button class="btn ghost" id="restoreBtn">Restore from backup</button>
       <button class="btn ghost" id="resetBtn">Reset all data</button>
     </div>
-    <p class="note">Your data lives only in this browser, on this device — nothing is sent anywhere. It survives closing the tab, but a cleared browser or a different device won't have it, so tap <b>Copy backup</b> now and then and paste it somewhere safe. <b>About the deficit:</b> it's your maintenance (TDEE) minus what you ate; the watch-burn is shown for reference and isn't double-counted. Estimated fat loss uses ~7,700 kcal ≈ 1 kg.</p>
+    <p class="note">Your data lives only in this browser, on this device — nothing is sent anywhere. It survives closing the tab, but a cleared browser or a different device won't have it, so tap <b>Copy backup</b> now and then and paste it somewhere safe. <b>About the deficit:</b> Maintenance = your BMR + the active calories from your watch's red ring; on any day you don't log a burn it falls back to BMR × your activity level. Deficit = maintenance − what you ate. Estimated fat loss uses ~7,700 kcal ≈ 1 kg.</p>
   </div>
 </div>
 
@@ -282,7 +282,10 @@ const KEY="prakrati_fatloss_v1", THKEY="prakrati_fl_theme";
 const KCAL_PER_KG=7700;
 const seed={
   profile:{sex:"female",age:33,heightCm:163,startWeight:74,goalWeight:62,activity:1.5,kcalTarget:1550,proteinTarget:130},
-  entries:[{date:"2026-07-31",weight:69.5,kcalIn:1185,kcalBurned:631,protein:75}]
+  entries:[
+    {date:"2026-07-31",weight:69.5,kcalIn:1185,kcalBurned:631,protein:75},
+    {date:"2026-08-31",weight:68,kcalIn:null,kcalBurned:null,protein:null}
+  ]
 };
 let state=load();
 
@@ -312,13 +315,20 @@ const css=v=>getComputedStyle(document.documentElement).getPropertyValue(v).trim
 /* ---------- math ---------- */
 function bmr(p,wt){const w=wt||p.startWeight;const base=10*w+6.25*p.heightCm-5*p.age;return p.sex==="male"?base+5:base-161;}
 function latestWeight(){const ws=state.entries.filter(e=>e.weight!=null&&e.weight!=="").sort((a,b)=>a.date<b.date?-1:1);return ws.length?ws[ws.length-1].weight:state.profile.startWeight;}
+function bmrForEntry(e){const w=(e&&e.weight!=null&&e.weight!=="")?e.weight:latestWeight();return bmr(state.profile,w);}
+// Maintenance per day = BMR + that day's Apple-Watch active burn (red ring).
+// If no burn was logged that day, fall back to BMR × activity multiplier.
+function maintenanceFor(e){const B=bmrForEntry(e);return (e&&e.kcalBurned!=null&&e.kcalBurned!=="")?(B+e.kcalBurned):(B*state.profile.activity);}
 function tdee(){return bmr(state.profile,latestWeight())*state.profile.activity;}
 function fmt(n,d=0){return n==null||isNaN(n)?"—":Number(n).toLocaleString("en-IN",{minimumFractionDigits:d,maximumFractionDigits:d});}
 
 /* ---------- render ---------- */
 let wChart,cChart;
 function render(){
-  const p=state.profile, T=tdee(), B=bmr(p,latestWeight());
+  const p=state.profile, B=bmr(p,latestWeight());
+  const _burns=state.entries.filter(e=>e.kcalBurned!=null&&e.kcalBurned!=="");
+  const avgBurn=_burns.length?_burns.reduce((s,e)=>s+e.kcalBurned,0)/_burns.length:null;
+  const T=Math.round(avgBurn!=null?(B+avgBurn):(B*p.activity)); // headline maintenance
   // profile inputs
   set("p_age",p.age);set("p_h",p.heightCm);set("p_sex",p.sex);set("p_start",p.startWeight);
   set("p_goal",p.goalWeight);set("p_act",p.activity);set("p_kcal",p.kcalTarget);set("p_pro",p.proteinTarget);
@@ -344,7 +354,7 @@ function render(){
   // stats
   const withIn=state.entries.filter(e=>e.kcalIn);
   const avgIn=withIn.length?withIn.reduce((s,e)=>s+e.kcalIn,0)/withIn.length:null;
-  const deficits=withIn.map(e=>T-e.kcalIn);
+  const deficits=withIn.map(e=>maintenanceFor(e)-e.kcalIn);
   const avgDef=deficits.length?deficits.reduce((a,b)=>a+b,0)/deficits.length:null;
   const cumDef=deficits.reduce((a,b)=>a+b,0);
   const fatKg=cumDef/KCAL_PER_KG;
@@ -353,7 +363,7 @@ function render(){
   const daysLogged=state.entries.length;
 
   const stats=[
-    {l:"Maintenance",v:fmt(T),s:"kcal/day",u:"est. TDEE"},
+    {l:"Maintenance",v:fmt(T),s:"kcal/day",u:avgBurn!=null?"BMR + your burn":"BMR × activity"},
     {l:"Avg intake",v:avgIn==null?"—":fmt(avgIn),s:"kcal/day",u:withIn.length+" days"},
     {l:"Avg deficit",v:avgDef==null?"—":fmt(avgDef),s:"kcal/day",u:"vs maintenance"},
     {l:"Est. fat lost",v:fmt(fatKg,2),s:"kg",u:"from deficit",hl:true},
@@ -378,7 +388,7 @@ function renderTable(T){
   const pt=state.profile.proteinTarget;
   body.innerHTML=rows.map(e=>{
     const net=e.kcalIn!=null&&e.kcalIn!==""?(e.kcalIn-(e.kcalBurned||0)):null;
-    const def=e.kcalIn?T-e.kcalIn:null;
+    const def=e.kcalIn?maintenanceFor(e)-e.kcalIn:null;
     const proPill=(e.protein!=null&&e.protein!=="")?`<span class="pill ${e.protein>=pt?'good':'bad'}">${fmt(e.protein)} g</span>`:"—";
     return `<tr>
       <td>${e.date}</td>
@@ -435,20 +445,23 @@ function drawCharts(T){
   const cPts=byDate.filter(e=>e.kcalIn);
   const cData=cPts.map(e=>e.kcalIn);
   const cLabels=cPts.map(e=>shortD(e.date));
-  const barColors=cData.map(v=>v<=T?hexA(good,.85):hexA(bad,.85));
+  const cMaint=cPts.map(e=>Math.round(maintenanceFor(e)));
+  const barColors=cPts.map(e=>e.kcalIn<=maintenanceFor(e)?hexA(good,.85):hexA(bad,.85));
   if(cChart)cChart.destroy();
   cChart=new Chart(document.getElementById("cChart"),{
     type:"bar",
     data:{labels:cLabels,datasets:[
-      {type:"line",label:"Maintenance",data:cLabels.map(()=>Math.round(T)),borderColor:gold,borderWidth:2,
+      {type:"line",label:"Maintenance",data:cMaint,borderColor:gold,borderWidth:2,
         borderDash:[5,4],pointRadius:0,tension:0,order:0},
       {label:"Eaten",data:cData,backgroundColor:barColors,borderRadius:5,borderSkipped:false,
         barPercentage:.7,categoryPercentage:.8,order:1}
     ]},
     options:{responsive:true,maintainAspectRatio:false,interaction:{mode:"index",intersect:false},
       plugins:{legend:{display:false},tooltip:{...tip,callbacks:{
-        label:c=>c.dataset.label==="Maintenance"?"Maintenance: "+Math.round(T)+" kcal":
-          "Eaten: "+c.parsed.y+" kcal  ("+((T-c.parsed.y)>=0?"−":"+")+Math.abs(Math.round(T-c.parsed.y))+" deficit)"}}},
+        label:function(c){const m=cMaint[c.dataIndex];
+          if(c.dataset.label==="Maintenance")return "Maintenance: "+m+" kcal";
+          const d=m-c.parsed.y;
+          return "Eaten: "+c.parsed.y+" kcal  ("+(d>=0?"−":"+")+Math.abs(Math.round(d))+" "+(d>=0?"deficit":"surplus")+")";}}}},
       scales:{y:{grid:gridC,ticks:tickC,border:{display:false},beginAtZero:true},
         x:{grid:{display:false},ticks:tickC,border:{color:line}}}}
   });
